@@ -1,4 +1,4 @@
-"""CNN Fear & Greed Index を取得して Webhook に通知する。
+"""CNN Fear & Greed Index を取得してメールで通知する。
 
 前回値は state.json に保存し、区分（Extreme Fear〜Extreme Greed）が変わったら
 変化を知らせる文面を先頭に付ける。標準ライブラリのみで動く。
@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 import os
+import smtplib
 import sys
 import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
-from urllib.parse import urlparse
 
 API_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 # ヘッダーなしだと 418 (I'm a teapot) が返るため、ブラウザからのアクセスに見せる
@@ -73,8 +74,8 @@ def change_message(prev: str, curr: str) -> str:
     else:
         arrow, direction = "📉", f"悲観方向へ{-steps}段階"
     return (
-        f"🔔 *区分が変化しました* {arrow}\n"
-        f"{label(prev)} → *{label(curr)}*\n"
+        f"🔔 区分が変化しました {arrow}\n"
+        f"{label(prev)} → {label(curr)}\n"
         f"{direction}動きました。{ENTER_COMMENT[curr]}"
     )
 
@@ -92,7 +93,7 @@ def build_message(data: dict, prev_rating: str | None) -> str:
     if prev_rating and prev_rating != rating:
         lines += [change_message(prev_rating, rating), ""]
     lines += [
-        f"{emoji} Fear & Greed Index: *{score:.0f}* — {label(rating)}",
+        f"{emoji} Fear & Greed Index: {score:.0f} — {label(rating)}",
         f"前日比 {diff('previous_close')} / 1週間前比 {diff('previous_1_week')}"
         f" / 1ヶ月前比 {diff('previous_1_month')} / 1年前比 {diff('previous_1_year')}",
         f"（{as_of:%Y-%m-%d %H:%M} JST 時点）",
@@ -100,17 +101,23 @@ def build_message(data: dict, prev_rating: str | None) -> str:
     return "\n".join(lines)
 
 
-def notify(webhook_url: str, text: str) -> None:
-    # Discord は content、Slack は text を受け取る
-    host = urlparse(webhook_url).hostname or ""
-    is_discord = host.endswith("discord.com") or host.endswith("discordapp.com")
-    payload = {"content": text} if is_discord else {"text": text}
-    req = urllib.request.Request(
-        webhook_url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    urllib.request.urlopen(req, timeout=20).close()
+def build_subject(data: dict, prev_rating: str | None) -> str:
+    rating = data["rating"]
+    score = f"{data['score']:.0f}"
+    if prev_rating and prev_rating != rating:
+        return f"【区分変化】{LABELS[prev_rating][0]} → {LABELS[rating][0]}（Fear & Greed {score}）"
+    return f"Fear & Greed {score}: {LABELS[rating][0]}"
+
+
+def send_mail(user: str, app_password: str, to: str, subject: str, body: str) -> None:
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = user
+    msg["To"] = to
+    msg.set_content(body)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
+        smtp.login(user, app_password)
+        smtp.send_message(msg)
 
 
 def load_state() -> dict:
@@ -134,14 +141,17 @@ def main() -> int:
         print(f"No new data since {data['timestamp']}; skipped.")
         return 0
 
-    text = build_message(data, state.get("rating"))
-    print(text)
+    subject = build_subject(data, state.get("rating"))
+    body = build_message(data, state.get("rating"))
+    print(subject, body, sep="\n\n")
 
-    webhook_url = os.environ.get("WEBHOOK_URL")
-    if webhook_url:
-        notify(webhook_url, text)
+    user = os.environ.get("MAIL_USER")
+    app_password = os.environ.get("MAIL_APP_PASSWORD")
+    if user and app_password:
+        # 送り先の指定がなければ自分宛て
+        send_mail(user, app_password, os.environ.get("MAIL_TO") or user, subject, body)
     else:
-        print("WEBHOOK_URL is not set; notification skipped.", file=sys.stderr)
+        print("MAIL_USER / MAIL_APP_PASSWORD are not set; mail skipped.", file=sys.stderr)
 
     save_state(data)
     return 0

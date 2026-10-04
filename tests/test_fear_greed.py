@@ -1,6 +1,6 @@
 import unittest
 
-from fear_greed import build_message, change_message
+from fear_greed import build_message, build_subject, change_message
 
 DATA = {
     "score": 31.17,
@@ -16,7 +16,7 @@ DATA = {
 class ChangeMessageTest(unittest.TestCase):
     def test_toward_greed(self):
         msg = change_message("extreme fear", "fear")
-        self.assertIn("Extreme Fear（極度の恐怖） → *Fear（恐怖）*", msg)
+        self.assertIn("Extreme Fear（極度の恐怖） → Fear（恐怖）", msg)
         self.assertIn("楽観方向へ1段階", msg)
 
     def test_toward_fear_across_neutral(self):
@@ -29,7 +29,7 @@ class BuildMessageTest(unittest.TestCase):
     def test_no_change_has_no_alert(self):
         msg = build_message(DATA, "fear")
         self.assertNotIn("区分が変化しました", msg)
-        self.assertIn("*31*", msg)
+        self.assertIn("Fear & Greed Index: 31", msg)
         self.assertIn("前日比 +3.1", msg)
         self.assertIn("2026-10-03 08:59 JST", msg)
 
@@ -38,7 +38,18 @@ class BuildMessageTest(unittest.TestCase):
 
     def test_change_alert_comes_first(self):
         msg = build_message(DATA, "extreme fear")
-        self.assertTrue(msg.startswith("🔔 *区分が変化しました*"))
+        self.assertTrue(msg.startswith("🔔 区分が変化しました"))
+
+
+class BuildSubjectTest(unittest.TestCase):
+    def test_no_change(self):
+        self.assertEqual(build_subject(DATA, "fear"), "Fear & Greed 31: Fear")
+
+    def test_change(self):
+        self.assertEqual(
+            build_subject(DATA, "extreme fear"),
+            "【区分変化】Extreme Fear → Fear（Fear & Greed 31）",
+        )
 
 
 if __name__ == "__main__":

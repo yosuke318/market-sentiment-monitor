@@ -25,7 +25,9 @@ jobs:
 
       - name: Fetch and notify
         env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
         run: python fear_greed.py
 
       - name: Commit state
