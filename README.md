@@ -1,6 +1,6 @@
 # market-sentiment-monitor
 
-CNN の [Fear & Greed Index](https://edition.cnn.com/markets/fear-and-greed) を毎日取得して Gmail からメールで通知する。
+CNN の [Fear & Greed Index](https://edition.cnn.com/markets/fear-and-greed) と[日経平均VI](https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi)を毎日取得して、1 通のメールにまとめて Gmail から通知する。
 区分（Extreme Fear / Fear / Neutral / Greed / Extreme Greed）が前回から変わった日は、変化を知らせる文面を先頭に付ける。
 
 ```
@@ -19,16 +19,26 @@ Extreme Fear（極度の恐怖） → Fear（恐怖）
 
 （2026-10-03 08:59 JST 時点）
 
-[過去6ヶ月の推移グラフ]
+────────────────
+
+📊 日経平均VI: 22.58（2026-10-02 終値）
+
+前日比: -0.34（22.92）
+1週間前比: +2.28（20.30）
+1ヶ月前比: -2.97（25.55）
+1年前比: -2.71（25.29）
+
+[Fear & Greed の過去6ヶ月の推移グラフ]
+[日経平均VI の過去6ヶ月の推移グラフ]
 ```
 
-括弧内は比較対象の時点の値。グラフは PNG で本文に埋め込む（`chart.py`）。描画に失敗した場合はグラフなしで送る。
+括弧内は比較対象の時点の値。日経平均VIの 1週間前・1ヶ月前・1年前は、その日以前で最も近い営業日と比べる。グラフは PNG で本文に埋め込む（`chart.py`）。描画や日経平均VIの取得に失敗した場合も、残りの内容で送る。メール 1 通は 160KB 程度。
 
 ## 仕組み
 
 - GitHub Actions が毎日 09:30 JST に `fear_greed.py` を実行（`.github/workflows/notify.yml`）
 - 前回の区分・スコア・データ時刻を `state/state.json` に保存し、Actions がコミットする
-- データ時刻が前回と同じ（週末・米国祝日）なら通知しない。手動実行時に `force` にチェックを入れると、同じデータでも送る
+- Fear & Greed・日経平均VIのどちらも前回と同じデータ（週末・日米ともに休場）なら通知しない。手動実行時に `force` にチェックを入れると、同じデータでも送る
 
 ## セットアップ
 

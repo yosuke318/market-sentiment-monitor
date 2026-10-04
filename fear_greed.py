@@ -1,7 +1,7 @@
-"""CNN Fear & Greed Index を取得してメールで通知する。
+"""CNN Fear & Greed Index と日経平均VIを取得してメールで通知する。
 
-前回値は state.json に保存し、区分（Extreme Fear〜Extreme Greed）が変わったら
-変化を知らせる文面を先頭に付ける。推移グラフを PNG でメールに埋め込む。
+前回値は state.json に保存し、Fear & Greed の区分（Extreme Fear〜Extreme Greed）が
+変わったら変化を知らせる文面を先頭に付ける。推移グラフを PNG でメールに埋め込む。
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
+
+import nikkei_vi
 
 API_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 # ヘッダーなしだと 418 (I'm a teapot) が返るため、ブラウザからのアクセスに見せる
@@ -118,37 +120,68 @@ def build_subject(data: dict, prev_rating: str | None) -> str:
 
 
 def send_mail(
-    user: str, app_password: str, to: str, subject: str, body: str, chart_png: bytes | None
+    user: str, app_password: str, to: str, subject: str, body: str,
+    charts: list[tuple[str, str, bytes]],
 ) -> None:
+    """charts は (Content-ID, 代替テキスト, PNG) のリスト。"""
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = to
     msg.set_content(body)
-    if chart_png:
+    if charts:
         # HTML 版に本文と同じテキスト＋グラフを入れ、画像は Content-ID で本文に埋め込む
         msg.add_alternative(
             '<div style="font-family:sans-serif;font-size:14px;line-height:1.6;white-space:pre-line">'
             f"{html.escape(body)}</div>"
-            '<img src="cid:chart" alt="Fear &amp; Greed Index の推移（過去6ヶ月）"'
-            ' width="640" style="max-width:100%;height:auto;margin-top:12px">',
+            + "".join(
+                f'<img src="cid:{cid}" alt="{html.escape(alt)}" width="640"'
+                ' style="max-width:100%;height:auto;margin-top:12px;display:block">'
+                for cid, alt, _ in charts
+            ),
             subtype="html",
         )
-        msg.get_payload()[1].add_related(chart_png, "image", "png", cid="<chart>")
+        related = msg.get_payload()[1]
+        for cid, _, png in charts:
+            related.add_related(png, "image", "png", cid=f"<{cid}>")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
         smtp.login(user, app_password)
         smtp.send_message(msg)
 
 
-def render_chart(historical: list[dict]) -> bytes | None:
+def render_charts(raw: dict, vi_rows: list | None) -> list[tuple[str, str, bytes]]:
     # グラフが描けなくても数値のメールは送る
     try:
         import chart
-
-        return chart.render(historical)
     except Exception as e:
         print(f"Chart skipped: {e!r}", file=sys.stderr)
-        return None
+        return []
+
+    jobs = [(
+        "fear-greed", "Fear & Greed Index の推移（過去6ヶ月）",
+        lambda: chart.render(
+            [
+                (datetime.fromtimestamp(p["x"] / 1000, timezone.utc), p["y"])
+                for p in raw["fear_and_greed_historical"]["data"]
+            ],
+            zones=chart.FEAR_GREED_ZONES,
+        ),
+    )]
+    if vi_rows:
+        jobs.append((
+            "nikkei-vi", "日経平均VI の推移（過去6ヶ月）",
+            lambda: chart.render(
+                [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in vi_rows],
+                value_format="{:.2f}",
+            ),
+        ))
+    charts = []
+    for cid, alt, draw in jobs:
+        try:
+            charts.append((cid, alt, draw()))
+        except Exception as e:
+            print(f"Chart {cid} skipped: {e!r}", file=sys.stderr)
+    return charts
 
 
 def load_state() -> dict:
@@ -157,9 +190,10 @@ def load_state() -> dict:
     return {}
 
 
-def save_state(data: dict) -> None:
+def save_state(data: dict, vi_date: str | None) -> None:
     STATE_PATH.parent.mkdir(exist_ok=True)
     state = {k: data[k] for k in ("rating", "score", "timestamp")}
+    state["nikkei_vi_date"] = vi_date
     STATE_PATH.write_text(json.dumps(state, indent=2) + "\n")
 
 
@@ -168,13 +202,27 @@ def main() -> int:
     data = raw["fear_and_greed"]
     state = load_state()
 
-    # 週末・祝日は前回と同じデータが返るので通知しない（FORCE=1 で手動テスト時は送る）
-    if state.get("timestamp") == data["timestamp"] and os.environ.get("FORCE") != "1":
-        print(f"No new data since {data['timestamp']}; skipped.")
+    # 日経平均VIが取れなくても Fear & Greed は送る
+    try:
+        vi_rows = nikkei_vi.fetch()
+        vi_date = vi_rows[-1][0].isoformat()
+    except Exception as e:
+        print(f"Nikkei VI fetch failed: {e!r}", file=sys.stderr)
+        vi_rows, vi_date = None, state.get("nikkei_vi_date")
+
+    # 週末・祝日はどちらも前回と同じデータなので通知しない（FORCE=1 で手動テスト時は送る）
+    is_new = state.get("timestamp") != data["timestamp"] or state.get("nikkei_vi_date") != vi_date
+    if not is_new and os.environ.get("FORCE") != "1":
+        print(f"No new data since {data['timestamp']} / Nikkei VI {vi_date}; skipped.")
         return 0
 
     subject = build_subject(data, state.get("rating"))
-    body = build_message(data, state.get("rating"))
+    body = build_message(data, state.get("rating")) + "\n\n" + "─" * 16 + "\n\n"
+    if vi_rows:
+        subject += f" / 日経VI {vi_rows[-1][1]:.1f}"
+        body += nikkei_vi.build_message(vi_rows)
+    else:
+        body += "⚠️ 日経平均VIは取得に失敗しました。"
     print(subject, body, sep="\n\n")
 
     user = os.environ.get("MAIL_USER", "").strip()
@@ -184,12 +232,12 @@ def main() -> int:
         # 送り先の指定がなければ自分宛て
         send_mail(
             user, app_password, os.environ.get("MAIL_TO") or user, subject, body,
-            render_chart(raw["fear_and_greed_historical"]["data"]),
+            render_charts(raw, vi_rows),
         )
     else:
         print("MAIL_USER / MAIL_APP_PASSWORD are not set; mail skipped.", file=sys.stderr)
 
-    save_state(data)
+    save_state(data, vi_date)
     return 0
 
 
