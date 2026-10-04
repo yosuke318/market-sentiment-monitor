@@ -123,26 +123,37 @@ def build_subject(data: dict, prev_rating: str | None) -> str:
     return f"Fear & Greed {score}: {LABELS[rating][0]}"
 
 
+SECTION_SEPARATOR = "\n\n" + "─" * 16 + "\n\n"
+
+
 def send_mail(
-    user: str, app_password: str, to: str, subject: str, body: str,
-    charts: list[tuple[str, str, bytes]],
+    user: str, app_password: str, to: str, subject: str,
+    sections: list[tuple[str, str]], charts: list[tuple[str, str, bytes]],
 ) -> None:
-    """charts は (Content-ID, 代替テキスト, PNG) のリスト。"""
+    """sections は (Content-ID, 本文) のリストで、HTML 版では各本文のすぐ下に同じ ID のグラフを置く。
+    charts は (Content-ID, 代替テキスト, PNG) のリスト。"""
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = to
-    msg.set_content(body)
+    msg.set_content(SECTION_SEPARATOR.join(text for _, text in sections))
     if charts:
-        # HTML 版に本文と同じテキスト＋グラフを入れ、画像は Content-ID で本文に埋め込む
+        # 画像は Content-ID で本文に埋め込む
+        alts = {cid: alt for cid, alt, _ in charts}
+        html_sections = []
+        for cid, text in sections:
+            part = (
+                '<div style="font-family:sans-serif;font-size:14px;line-height:1.6;white-space:pre-line">'
+                f"{html.escape(text)}</div>"
+            )
+            if cid in alts:
+                part += (
+                    f'<img src="cid:{cid}" alt="{html.escape(alts[cid])}" width="640"'
+                    ' style="max-width:100%;height:auto;margin-top:12px;display:block">'
+                )
+            html_sections.append(part)
         msg.add_alternative(
-            '<div style="font-family:sans-serif;font-size:14px;line-height:1.6;white-space:pre-line">'
-            f"{html.escape(body)}</div>"
-            + "".join(
-                f'<img src="cid:{cid}" alt="{html.escape(alt)}" width="640"'
-                ' style="max-width:100%;height:auto;margin-top:12px;display:block">'
-                for cid, alt, _ in charts
-            ),
+            '<hr style="border:none;border-top:1px solid #e1e0d9;margin:24px 0">'.join(html_sections),
             subtype="html",
         )
         related = msg.get_payload()[1]
@@ -252,18 +263,20 @@ def main() -> int:
         return 0
 
     subject = build_subject(data, state.get("rating"))
-    body = build_message(data, state.get("rating")) + "\n\n" + "─" * 16 + "\n\n"
+    us_text = build_message(data, state.get("rating"))
+    jp_texts = []
     if vi_rows:
         subject += f" / 日経VI {vi_rows[-1][1]:.1f}"
-        body += nikkei.build_vi_message(vi_rows)
+        jp_texts.append(nikkei.build_vi_message(vi_rows))
     else:
-        body += "⚠️ 日経平均VIは取得に失敗しました。"
-    body += "\n\n"
+        jp_texts.append("⚠️ 日経平均VIは取得に失敗しました。")
     if average_rows:
-        body += nikkei.build_average_message(average_rows)
+        jp_texts.append(nikkei.build_average_message(average_rows))
     else:
-        body += "⚠️ 日経平均株価は取得に失敗しました。"
-    body += "\n\n" + nikkei.VI_GUIDE
+        jp_texts.append("⚠️ 日経平均株価は取得に失敗しました。")
+    # グラフの直前にそのグラフの数値が来るよう、米国と日本で区切る
+    sections = [("fear-greed", us_text), ("nikkei", "\n\n".join(jp_texts))]
+    body = SECTION_SEPARATOR.join(text for _, text in sections)
     print(subject, body, sep="\n\n")
 
     user = os.environ.get("MAIL_USER", "").strip()
@@ -272,7 +285,7 @@ def main() -> int:
     if user and app_password:
         # 送り先の指定がなければ自分宛て
         send_mail(
-            user, app_password, os.environ.get("MAIL_TO") or user, subject, body,
+            user, app_password, os.environ.get("MAIL_TO") or user, subject, sections,
             render_charts(raw, vi_rows, average_rows),
         )
     else:

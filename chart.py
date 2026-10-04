@@ -96,7 +96,7 @@ def render_dual_axis(
     left / right は (凡例名, 点列, 値の書式)。左右の目盛りの範囲しだいで線の重なり方は
     いくらでも変わって見えるので、範囲は手で合わせず各データの最小〜最大から自動で取る。
     right_zones を渡すと、右軸はその範囲に固定して背景に区分の帯を敷く（Fear & Greed 用）。
-    帯と同系色にならないよう、そのとき右の線は黒にして塗りつぶさない。
+    そのとき右の線は塗りつぶさない（帯と重なって読みにくくなるため）。
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
     fig, ax_left = plt.subplots(figsize=(8, 4.2), dpi=150)
@@ -124,7 +124,7 @@ def render_dual_axis(
 
     for ax, (name, points, value_format), color, fill in (
         (ax_left, left, SERIES_COLORS[1], False),
-        (ax_right, right, INK if right_zones else SERIES_COLORS[0], not right_zones),
+        (ax_right, right, SERIES_COLORS[0], not right_zones),
     ):
         points = [(t, y) for t, y in points if t >= since]
         xs = [t for t, _ in points]

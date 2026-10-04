@@ -28,14 +28,6 @@ COMPARISONS = [
 ]
 
 
-# メール本文に添える見方。Fear & Greed とは向きが逆なのでそこを先に書く
-VI_GUIDE = """💡 日経平均VIの見方
-・Fear & Greed とは向きが逆で、高いほど不安が強い
-・日経平均オプションの価格から、今後1ヶ月に日経平均がどれだけ動くと市場が見込んでいるかを年率%で表したもの
-・目安: 20前後は平常、30を超えると警戒、40超は急落時のパニック水準
-・日経平均が急落すると跳ね上がり、落ち着くとゆっくり下がる傾向がある"""
-
-
 def fetch(csv_name: str, retries: int = 3) -> list[tuple[date, float]]:
     """古い順の (日付, 終値) を返す。"""
     req = urllib.request.Request(CSV_BASE + csv_name, headers={"User-Agent": USER_AGENT})
