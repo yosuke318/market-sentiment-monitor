@@ -5,6 +5,11 @@ on:
     # 毎日 00:30 UTC (09:30 JST)。米国市場の終値確定後。週末・祝日はスクリプト側でスキップ
     - cron: "30 0 * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "データが前回と同じでも送る（動作確認用）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -22,12 +27,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+
+      - run: pip install -r requirements.txt
 
       - name: Fetch and notify
         env:
           MAIL_USER: ${{ secrets.MAIL_USER }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          FORCE: ${{ inputs.force && '1' || '' }}
         run: python fear_greed.py
 
       - name: Commit state

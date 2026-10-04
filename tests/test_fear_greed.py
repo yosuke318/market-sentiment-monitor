@@ -30,7 +30,7 @@ class BuildMessageTest(unittest.TestCase):
         msg = build_message(DATA, "fear")
         self.assertNotIn("区分が変化しました", msg)
         self.assertIn("Fear & Greed Index: 31", msg)
-        self.assertIn("前日比 +3.1", msg)
+        self.assertIn("前日比: +3.1（28）\n1週間前比: -5.8（37）", msg)
         self.assertIn("2026-10-03 08:59 JST", msg)
 
     def test_first_run_has_no_alert(self):

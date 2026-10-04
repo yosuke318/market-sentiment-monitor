@@ -1,11 +1,12 @@
 """CNN Fear & Greed Index を取得してメールで通知する。
 
 前回値は state.json に保存し、区分（Extreme Fear〜Extreme Greed）が変わったら
-変化を知らせる文面を先頭に付ける。標準ライブラリのみで動く。
+変化を知らせる文面を先頭に付ける。推移グラフを PNG でメールに埋め込む。
 """
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import smtplib
@@ -39,6 +40,12 @@ LABELS = {
     "greed": ("Greed", "強欲", "😏"),
     "extreme greed": ("Extreme Greed", "極度の強欲", "🤑"),
 }
+COMPARISONS = [
+    ("前日比", "previous_close"),
+    ("1週間前比", "previous_1_week"),
+    ("1ヶ月前比", "previous_1_month"),
+    ("1年前比", "previous_1_year"),
+]
 # 変化先の区分ごとの一言
 ENTER_COMMENT = {
     "extreme fear": "市場は極度の悲観状態に入りました。",
@@ -54,7 +61,7 @@ def fetch(retries: int = 3) -> dict:
     for attempt in range(1, retries + 1):
         try:
             with urllib.request.urlopen(req, timeout=20) as res:
-                return json.load(res)["fear_and_greed"]
+                return json.load(res)
         except Exception:
             if attempt == retries:
                 raise
@@ -86,16 +93,17 @@ def build_message(data: dict, prev_rating: str | None) -> str:
     emoji = LABELS[rating][2]
     as_of = datetime.fromisoformat(data["timestamp"]).astimezone(JST)
 
-    def diff(key: str) -> str:
-        return f"{score - data[key]:+.1f}"
-
     lines = []
     if prev_rating and prev_rating != rating:
         lines += [change_message(prev_rating, rating), ""]
     lines += [
         f"{emoji} Fear & Greed Index: {score:.0f} — {label(rating)}",
-        f"前日比 {diff('previous_close')} / 1週間前比 {diff('previous_1_week')}"
-        f" / 1ヶ月前比 {diff('previous_1_month')} / 1年前比 {diff('previous_1_year')}",
+        "",
+        *(
+            f"{name}: {score - data[key]:+.1f}（{data[key]:.0f}）"
+            for name, key in COMPARISONS
+        ),
+        "",
         f"（{as_of:%Y-%m-%d %H:%M} JST 時点）",
     ]
     return "\n".join(lines)
@@ -109,15 +117,38 @@ def build_subject(data: dict, prev_rating: str | None) -> str:
     return f"Fear & Greed {score}: {LABELS[rating][0]}"
 
 
-def send_mail(user: str, app_password: str, to: str, subject: str, body: str) -> None:
+def send_mail(
+    user: str, app_password: str, to: str, subject: str, body: str, chart_png: bytes | None
+) -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = to
     msg.set_content(body)
+    if chart_png:
+        # HTML 版に本文と同じテキスト＋グラフを入れ、画像は Content-ID で本文に埋め込む
+        msg.add_alternative(
+            '<div style="font-family:sans-serif;font-size:14px;line-height:1.6;white-space:pre-line">'
+            f"{html.escape(body)}</div>"
+            '<img src="cid:chart" alt="Fear &amp; Greed Index の推移（過去6ヶ月）"'
+            ' width="640" style="max-width:100%;height:auto;margin-top:12px">',
+            subtype="html",
+        )
+        msg.get_payload()[1].add_related(chart_png, "image", "png", cid="<chart>")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=20) as smtp:
         smtp.login(user, app_password)
         smtp.send_message(msg)
+
+
+def render_chart(historical: list[dict]) -> bytes | None:
+    # グラフが描けなくても数値のメールは送る
+    try:
+        import chart
+
+        return chart.render(historical)
+    except Exception as e:
+        print(f"Chart skipped: {e!r}", file=sys.stderr)
+        return None
 
 
 def load_state() -> dict:
@@ -133,11 +164,12 @@ def save_state(data: dict) -> None:
 
 
 def main() -> int:
-    data = fetch()
+    raw = fetch()
+    data = raw["fear_and_greed"]
     state = load_state()
 
-    # 週末・祝日は前回と同じデータが返るので通知しない
-    if state.get("timestamp") == data["timestamp"]:
+    # 週末・祝日は前回と同じデータが返るので通知しない（FORCE=1 で手動テスト時は送る）
+    if state.get("timestamp") == data["timestamp"] and os.environ.get("FORCE") != "1":
         print(f"No new data since {data['timestamp']}; skipped.")
         return 0
 
@@ -150,7 +182,10 @@ def main() -> int:
     app_password = "".join(os.environ.get("MAIL_APP_PASSWORD", "").split())
     if user and app_password:
         # 送り先の指定がなければ自分宛て
-        send_mail(user, app_password, os.environ.get("MAIL_TO") or user, subject, body)
+        send_mail(
+            user, app_password, os.environ.get("MAIL_TO") or user, subject, body,
+            render_chart(raw["fear_and_greed_historical"]["data"]),
+        )
     else:
         print("MAIL_USER / MAIL_APP_PASSWORD are not set; mail skipped.", file=sys.stderr)
 

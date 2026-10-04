@@ -11,15 +11,24 @@ Extreme Fear（極度の恐怖） → Fear（恐怖）
 楽観方向へ1段階動きました。市場心理は悲観寄りです。
 
 😨 Fear & Greed Index: 31 — Fear（恐怖）
-前日比 +7.2 / 1週間前比 -5.8 / 1ヶ月前比 -14.9 / 1年前比 -23.4
+
+前日比: +3.1（28）
+1週間前比: -5.8（37）
+1ヶ月前比: -14.9（46）
+1年前比: -23.4（55）
+
 （2026-10-03 08:59 JST 時点）
+
+[過去6ヶ月の推移グラフ]
 ```
+
+括弧内は比較対象の時点の値。グラフは PNG で本文に埋め込む（`chart.py`）。描画に失敗した場合はグラフなしで送る。
 
 ## 仕組み
 
 - GitHub Actions が毎日 09:30 JST に `fear_greed.py` を実行（`.github/workflows/notify.yml`）
 - 前回の区分・スコア・データ時刻を `state/state.json` に保存し、Actions がコミットする
-- データ時刻が前回と同じ（週末・米国祝日）なら通知しない
+- データ時刻が前回と同じ（週末・米国祝日）なら通知しない。手動実行時に `force` にチェックを入れると、同じデータでも送る
 
 ## セットアップ
 
@@ -36,7 +45,10 @@ Extreme Fear（極度の恐怖） → Fear（恐怖）
 
 ## ローカル実行
 
+グラフ描画に matplotlib を使う（`requirements.txt`）。
+
 ```sh
+pip install -r requirements.txt
 python3 fear_greed.py   # MAIL_USER / MAIL_APP_PASSWORD 未設定なら標準出力のみ
 MAIL_USER=you@gmail.com MAIL_APP_PASSWORD=xxxx python3 fear_greed.py
 python3 -m unittest discover -s tests -t .

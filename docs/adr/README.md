@@ -6,3 +6,4 @@
 | [0002](0002-run-on-github-actions.md) | GitHub Actions の schedule で実行する | Accepted |
 | [0003](0003-persist-state-in-repo.md) | 前回状態をリポジトリにコミットして持つ | Accepted |
 | [0004](0004-notify-by-gmail-smtp.md) | 通知は Gmail の SMTP でメール送信する | Accepted |
+| [0005](0005-embed-chart-png-in-mail.md) | 推移グラフは matplotlib の PNG をメールに埋め込む | Accepted |
