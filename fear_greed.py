@@ -145,8 +145,9 @@ def main() -> int:
     body = build_message(data, state.get("rating"))
     print(subject, body, sep="\n\n")
 
-    user = os.environ.get("MAIL_USER")
-    app_password = os.environ.get("MAIL_APP_PASSWORD")
+    user = os.environ.get("MAIL_USER", "").strip()
+    # Google の画面からコピーすると区切りの空白（NBSP を含む）が混ざるので除く
+    app_password = "".join(os.environ.get("MAIL_APP_PASSWORD", "").split())
     if user and app_password:
         # 送り先の指定がなければ自分宛て
         send_mail(user, app_password, os.environ.get("MAIL_TO") or user, subject, body)
