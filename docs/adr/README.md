@@ -10,3 +10,4 @@
 | [0006](0006-nikkei-vi-from-official-csv.md) | 日経平均VIは日経公式サイトの CSV から取る | Accepted |
 | [0007](0007-stack-nikkei-vi-and-average.md) | 日経平均VIと日経平均株価は上下 2 段のグラフにする | Superseded by 0008 |
 | [0008](0008-overlay-nikkei-vi-and-average.md) | 日経平均VIと日経平均株価は左右 2 軸で重ねる | Accepted |
+| [0009](0009-overlay-sp500-and-fear-greed.md) | S&P500 と Fear & Greed も左右 2 軸で重ねる | Accepted |

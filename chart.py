@@ -88,11 +88,15 @@ def render_dual_axis(
     left: tuple[str, list[tuple[datetime, float]], str],
     right: tuple[str, list[tuple[datetime, float]], str],
     days: int,
+    *,
+    right_zones: list[tuple] | None = None,
 ) -> bytes:
     """2 つの指標を 1 つの枠に重ね、左右それぞれの y 軸で描く。
 
     left / right は (凡例名, 点列, 値の書式)。左右の目盛りの範囲しだいで線の重なり方は
     いくらでも変わって見えるので、範囲は手で合わせず各データの最小〜最大から自動で取る。
+    right_zones を渡すと、右軸はその範囲に固定して背景に区分の帯を敷く（Fear & Greed 用）。
+    帯と同系色にならないよう、そのとき右の線は黒にして塗りつぶさない。
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
     fig, ax_left = plt.subplots(figsize=(8, 4.2), dpi=150)
@@ -107,9 +111,20 @@ def render_dual_axis(
 
     handles = []
     last_x = None
+    if right_zones:
+        for low, high, zone_name, zone_color, alpha in right_zones:
+            # 左軸の線の背景にもなるので、単独グラフより薄くする
+            ax_right.axhspan(low, high, color=zone_color, alpha=alpha * 0.5, linewidth=0)
+            ax_right.text(
+                1.09, (low + high) / 2, zone_name, transform=ax_right.get_yaxis_transform(),
+                va="center", ha="left", fontsize=7, color=MUTED,
+            )
+        ax_right.set_ylim(right_zones[0][0], right_zones[-1][1])
+        ax_right.set_yticks(sorted({z[0] for z in right_zones} | {right_zones[-1][1]}))
+
     for ax, (name, points, value_format), color, fill in (
         (ax_left, left, SERIES_COLORS[1], False),
-        (ax_right, right, SERIES_COLORS[0], True),
+        (ax_right, right, INK if right_zones else SERIES_COLORS[0], not right_zones),
     ):
         points = [(t, y) for t, y in points if t >= since]
         xs = [t for t, _ in points]
@@ -132,7 +147,8 @@ def render_dual_axis(
     # 目盛りの数値だけでは左右どちらの軸か分からないので、軸名を付ける
     ax_left.set_ylabel(f"{left[0]}  (left)", color=MUTED, fontsize=8)
     ax_right.set_ylabel(f"{right[0]}  (right)", color=MUTED, fontsize=8)
-    ax_left.grid(axis="both", color=GRID, linewidth=0.6)
+    # 区分の帯があるときは横の基準線を帯だけにし、左軸の横グリッドと混ざらないようにする
+    ax_left.grid(axis="x" if right_zones else "both", color=GRID, linewidth=0.6)
     ax_left.spines["bottom"].set_visible(True)
     ax_left.spines["bottom"].set_color(BASELINE)
     ax_left.legend(
@@ -146,6 +162,7 @@ def render_dual_axis(
 
     fig.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=SURFACE)
+    # 枠の外に置いた区分名が切れないよう、余白を含めて書き出す
+    fig.savefig(buf, format="png", facecolor=SURFACE, bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
     return buf.getvalue()

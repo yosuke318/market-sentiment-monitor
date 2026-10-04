@@ -44,6 +44,8 @@ LABELS = {
 }
 # 日経平均VIの急騰と株価の急落を見比べられるよう、過去の大きな局面が入る長さにする
 NIKKEI_CHART_DAYS = 900
+# CNN の API が返すのが約 1 年分なので、それを全部使う
+US_CHART_DAYS = 365
 COMPARISONS = [
     ("前日比", "previous_close"),
     ("1週間前比", "previous_1_week"),
@@ -161,16 +163,28 @@ def render_charts(
         print(f"Chart skipped: {e!r}", file=sys.stderr)
         return []
 
-    jobs = [(
-        "fear-greed", "Fear & Greed Index の推移（過去6ヶ月）",
-        lambda: chart.render(
-            [
-                (datetime.fromtimestamp(p["x"] / 1000, timezone.utc), p["y"])
-                for p in raw["fear_and_greed_historical"]["data"]
-            ],
-            zones=chart.FEAR_GREED_ZONES,
-        ),
-    )]
+    def cnn_points(series: list[dict]) -> list:
+        return [(datetime.fromtimestamp(p["x"] / 1000, timezone.utc), p["y"]) for p in series]
+
+    fear_greed_points = cnn_points(raw["fear_and_greed_historical"]["data"])
+    sp500 = raw.get("market_momentum_sp500", {}).get("data")
+    if sp500:
+        # CNN の API は S&P500 の終値も Fear & Greed と同じ約 1 年分返す
+        jobs = [(
+            "fear-greed", "S&P500（左軸）と Fear & Greed Index（右軸）の推移（過去1年）",
+            lambda: chart.render_dual_axis(
+                ("S&P 500", cnn_points(sp500), "{:,.0f}"),
+                ("Fear & Greed", fear_greed_points, "{:.0f}"),
+                days=US_CHART_DAYS,
+                right_zones=chart.FEAR_GREED_ZONES,
+            ),
+        )]
+    else:
+        jobs = [(
+            "fear-greed", "Fear & Greed Index の推移（過去6ヶ月）",
+            lambda: chart.render(fear_greed_points, zones=chart.FEAR_GREED_ZONES),
+        )]
+
     def to_points(rows: list) -> list:
         return [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in rows]
 
