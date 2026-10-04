@@ -84,43 +84,65 @@ def render(
     return buf.getvalue()
 
 
-def render_panels(panels: list[tuple[str, list[tuple[datetime, float]], str]]) -> bytes:
-    """同じ期間の複数指標を、x 軸を共有した上下の段に描く。
+def render_dual_axis(
+    left: tuple[str, list[tuple[datetime, float]], str],
+    right: tuple[str, list[tuple[datetime, float]], str],
+    days: int,
+) -> bytes:
+    """2 つの指標を 1 つの枠に重ね、左右それぞれの y 軸で描く。
 
-    panels は (見出し, 点列, 値の書式)。単位も桁も違う指標を 1 つの枠に左右 2 軸で
-    重ねると、軸の取り方しだいで相関があるように見えてしまうので、段を分ける。
+    left / right は (凡例名, 点列, 値の書式)。左右の目盛りの範囲しだいで線の重なり方は
+    いくらでも変わって見えるので、範囲は手で合わせず各データの最小〜最大から自動で取る。
     """
-    since = datetime.now(timezone.utc) - timedelta(days=DAYS)
-    fig, axes = plt.subplots(
-        len(panels), 1, sharex=True, figsize=(8, 2.4 * len(panels) + 0.4), dpi=150,
-    )
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    fig, ax_left = plt.subplots(figsize=(8, 4.2), dpi=150)
+    ax_right = ax_left.twinx()
     fig.patch.set_facecolor(SURFACE)
+    ax_left.set_facecolor(SURFACE)
+
+    # 右（VI）を奥に、左（株価）を手前に描く
+    ax_right.set_zorder(1)
+    ax_left.set_zorder(2)
+    ax_left.patch.set_visible(False)
+
+    handles = []
     last_x = None
-    for ax, (title, points, value_format), color in zip(axes, panels, SERIES_COLORS):
+    for ax, (name, points, value_format), color, fill in (
+        (ax_left, left, SERIES_COLORS[1], False),
+        (ax_right, right, SERIES_COLORS[0], True),
+    ):
         points = [(t, y) for t, y in points if t >= since]
         xs = [t for t, _ in points]
         ys = [y for _, y in points]
         last_x = max(last_x or xs[-1], xs[-1])
-        ax.set_facecolor(SURFACE)
-        ax.plot(xs, ys, color=color, linewidth=1.6, solid_capstyle="round")
-        ax.scatter([xs[-1]], [ys[-1]], s=28, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=3)
+        (line,) = ax.plot(xs, ys, color=color, linewidth=1.4, solid_capstyle="round", label=name)
+        if fill:
+            ax.fill_between(xs, ys, min(ys), color=color, alpha=0.08, linewidth=0)
+        ax.scatter([xs[-1]], [ys[-1]], s=24, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=3)
         ax.annotate(
             value_format.format(ys[-1]), (xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points",
-            ha="left", va="center", fontsize=10, fontweight="bold", color=INK,
+            ha="left", va="center", fontsize=9, fontweight="bold", color=INK,
         )
-        # 見出しの色見本で、どの線がどの指標かを色だけに頼らず示す
-        ax.text(0, 1.04, "\u25AC ", transform=ax.transAxes, color=color, fontsize=10, va="bottom")
-        ax.text(0.035, 1.04, title, transform=ax.transAxes, color=INK, fontsize=10, va="bottom")
-        ax.grid(axis="both", color=GRID, linewidth=0.6)
         ax.yaxis.set_major_formatter(mticker.StrMethodFormatter("{x:,.0f}"))
         ax.tick_params(colors=MUTED, labelsize=8, length=0)
-        for side in ("top", "right", "left"):
+        for side in ax.spines:
             ax.spines[side].set_visible(False)
-        ax.spines["bottom"].set_color(BASELINE)
+        handles.append(line)
 
-    axes[-1].set_xlim(since, last_x + timedelta(days=16))
-    axes[-1].xaxis.set_major_locator(mdates.MonthLocator())
-    axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    # 目盛りの数値だけでは左右どちらの軸か分からないので、軸名を付ける
+    ax_left.set_ylabel(f"{left[0]}  (left)", color=MUTED, fontsize=8)
+    ax_right.set_ylabel(f"{right[0]}  (right)", color=MUTED, fontsize=8)
+    ax_left.grid(axis="both", color=GRID, linewidth=0.6)
+    ax_left.spines["bottom"].set_visible(True)
+    ax_left.spines["bottom"].set_color(BASELINE)
+    ax_left.legend(
+        handles=handles, loc="upper left", frameon=False, fontsize=9, labelcolor=INK,
+        bbox_to_anchor=(0, 1.12), ncol=2,
+    )
+
+    ax_left.set_xlim(since, last_x + timedelta(days=days // 15))
+    ax_left.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+    ax_left.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
 
     fig.tight_layout()
     buf = io.BytesIO()

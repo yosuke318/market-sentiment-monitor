@@ -42,6 +42,8 @@ LABELS = {
     "greed": ("Greed", "強欲", "😏"),
     "extreme greed": ("Extreme Greed", "極度の強欲", "🤑"),
 }
+# 日経平均VIの急騰と株価の急落を見比べられるよう、過去の大きな局面が入る長さにする
+NIKKEI_CHART_DAYS = 900
 COMPARISONS = [
     ("前日比", "previous_close"),
     ("1週間前比", "previous_1_week"),
@@ -172,21 +174,22 @@ def render_charts(
     def to_points(rows: list) -> list:
         return [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in rows]
 
-    panels = []
-    if vi_rows:
-        panels.append(("Nikkei VI", to_points(vi_rows), "{:.2f}"))
-    if average_rows:
-        panels.append(("Nikkei 225", to_points(average_rows), "{:,.0f}"))
-    if len(panels) == 2:
+    if vi_rows and average_rows:
         jobs.append((
-            "nikkei", "日経平均VI（上）と日経平均株価（下）の推移（過去6ヶ月）",
-            lambda: chart.render_panels(panels),
+            "nikkei", "日経平均株価（左軸）と日経平均VI（右軸）の推移（過去2年半）",
+            lambda: chart.render_dual_axis(
+                ("Nikkei 225", to_points(average_rows), "{:,.0f}"),
+                ("Nikkei VI", to_points(vi_rows), "{:.2f}"),
+                days=NIKKEI_CHART_DAYS,
+            ),
         ))
-    elif panels:
-        title, points, value_format = panels[0]
+    elif vi_rows or average_rows:
+        rows, name, value_format = (
+            (vi_rows, "日経平均VI", "{:.2f}") if vi_rows else (average_rows, "日経平均株価", "{:,.0f}")
+        )
         jobs.append((
-            "nikkei", f"{title} の推移（過去6ヶ月）",
-            lambda: chart.render(points, value_format=value_format),
+            "nikkei", f"{name}の推移（過去6ヶ月）",
+            lambda: chart.render(to_points(rows), value_format=value_format),
         ))
     charts = []
     for cid, alt, draw in jobs:
