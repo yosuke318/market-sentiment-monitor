@@ -1,4 +1,4 @@
-"""CNN Fear & Greed Index と日経平均VIを取得してメールで通知する。
+"""CNN Fear & Greed Index と日経平均VI・日経平均株価を取得してメールで通知する。
 
 前回値は state.json に保存し、Fear & Greed の区分（Extreme Fear〜Extreme Greed）が
 変わったら変化を知らせる文面を先頭に付ける。推移グラフを PNG でメールに埋め込む。
@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
-import nikkei_vi
+import nikkei
 
 API_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 # ヘッダーなしだと 418 (I'm a teapot) が返るため、ブラウザからのアクセスに見せる
@@ -149,7 +149,9 @@ def send_mail(
         smtp.send_message(msg)
 
 
-def render_charts(raw: dict, vi_rows: list | None) -> list[tuple[str, str, bytes]]:
+def render_charts(
+    raw: dict, vi_rows: list | None, average_rows: list | None
+) -> list[tuple[str, str, bytes]]:
     # グラフが描けなくても数値のメールは送る
     try:
         import chart
@@ -167,13 +169,24 @@ def render_charts(raw: dict, vi_rows: list | None) -> list[tuple[str, str, bytes
             zones=chart.FEAR_GREED_ZONES,
         ),
     )]
+    def to_points(rows: list) -> list:
+        return [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in rows]
+
+    panels = []
     if vi_rows:
+        panels.append(("Nikkei VI", to_points(vi_rows), "{:.2f}"))
+    if average_rows:
+        panels.append(("Nikkei 225", to_points(average_rows), "{:,.0f}"))
+    if len(panels) == 2:
         jobs.append((
-            "nikkei-vi", "日経平均VI の推移（過去6ヶ月）",
-            lambda: chart.render(
-                [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in vi_rows],
-                value_format="{:.2f}",
-            ),
+            "nikkei", "日経平均VI（上）と日経平均株価（下）の推移（過去6ヶ月）",
+            lambda: chart.render_panels(panels),
+        ))
+    elif panels:
+        title, points, value_format = panels[0]
+        jobs.append((
+            "nikkei", f"{title} の推移（過去6ヶ月）",
+            lambda: chart.render(points, value_format=value_format),
         ))
     charts = []
     for cid, alt, draw in jobs:
@@ -182,6 +195,14 @@ def render_charts(raw: dict, vi_rows: list | None) -> list[tuple[str, str, bytes
         except Exception as e:
             print(f"Chart {cid} skipped: {e!r}", file=sys.stderr)
     return charts
+
+
+def fetch_nikkei(csv_name: str) -> list | None:
+    try:
+        return nikkei.fetch(csv_name)
+    except Exception as e:
+        print(f"Nikkei fetch failed ({csv_name}): {e!r}", file=sys.stderr)
+        return None
 
 
 def load_state() -> dict:
@@ -202,13 +223,10 @@ def main() -> int:
     data = raw["fear_and_greed"]
     state = load_state()
 
-    # 日経平均VIが取れなくても Fear & Greed は送る
-    try:
-        vi_rows = nikkei_vi.fetch()
-        vi_date = vi_rows[-1][0].isoformat()
-    except Exception as e:
-        print(f"Nikkei VI fetch failed: {e!r}", file=sys.stderr)
-        vi_rows, vi_date = None, state.get("nikkei_vi_date")
+    # 日経のデータが取れなくても Fear & Greed は送る
+    vi_rows = fetch_nikkei(nikkei.VI_CSV)
+    average_rows = fetch_nikkei(nikkei.AVERAGE_CSV)
+    vi_date = vi_rows[-1][0].isoformat() if vi_rows else state.get("nikkei_vi_date")
 
     # 週末・祝日はどちらも前回と同じデータなので通知しない（FORCE=1 で手動テスト時は送る）
     is_new = state.get("timestamp") != data["timestamp"] or state.get("nikkei_vi_date") != vi_date
@@ -220,9 +238,15 @@ def main() -> int:
     body = build_message(data, state.get("rating")) + "\n\n" + "─" * 16 + "\n\n"
     if vi_rows:
         subject += f" / 日経VI {vi_rows[-1][1]:.1f}"
-        body += nikkei_vi.build_message(vi_rows)
+        body += nikkei.build_vi_message(vi_rows)
     else:
         body += "⚠️ 日経平均VIは取得に失敗しました。"
+    body += "\n\n"
+    if average_rows:
+        body += nikkei.build_average_message(average_rows)
+    else:
+        body += "⚠️ 日経平均株価は取得に失敗しました。"
+    body += "\n\n" + nikkei.VI_GUIDE
     print(subject, body, sep="\n\n")
 
     user = os.environ.get("MAIL_USER", "").strip()
@@ -232,7 +256,7 @@ def main() -> int:
         # 送り先の指定がなければ自分宛て
         send_mail(
             user, app_password, os.environ.get("MAIL_TO") or user, subject, body,
-            render_charts(raw, vi_rows),
+            render_charts(raw, vi_rows, average_rows),
         )
     else:
         print("MAIL_USER / MAIL_APP_PASSWORD are not set; mail skipped.", file=sys.stderr)

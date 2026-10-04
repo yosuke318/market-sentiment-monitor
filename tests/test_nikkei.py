@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from nikkei_vi import build_message, parse
+from nikkei import build_average_message, build_vi_message, parse
 
 CSV = """データ日付,終値,始値,高値,安値
 "2025/10/01","25.00","25.00","25.00","25.00"
@@ -23,7 +23,7 @@ class ParseTest(unittest.TestCase):
 
 class BuildMessageTest(unittest.TestCase):
     def test_comparisons_use_nearest_earlier_trading_day(self):
-        msg = build_message(parse(CSV))
+        msg = build_vi_message(parse(CSV))
         self.assertIn("日経平均VI: 22.58（2026-10-02 終値）", msg)
         self.assertIn("前日比: -0.34（22.92）", msg)
         # 1週間前の 9/25 はちょうど営業日
@@ -31,3 +31,11 @@ class BuildMessageTest(unittest.TestCase):
         # 30日前の 9/2 はデータがないので 9/1 と比べる
         self.assertIn("1ヶ月前比: +2.58（20.00）", msg)
         self.assertIn("1年前比: -2.42（25.00）", msg)
+
+
+class BuildAverageMessageTest(unittest.TestCase):
+    def test_percent_change_and_yen(self):
+        rows = [(date(2026, 10, 1), 50000.0), (date(2026, 10, 2), 51000.0)]
+        msg = build_average_message(rows)
+        self.assertIn("日経平均株価: 51,000円（2026-10-02 終値）", msg)
+        self.assertIn("前日比: +2.0%（50,000円）", msg)

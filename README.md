@@ -1,6 +1,6 @@
 # market-sentiment-monitor
 
-CNN の [Fear & Greed Index](https://edition.cnn.com/markets/fear-and-greed) と[日経平均VI](https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi)を毎日取得して、1 通のメールにまとめて Gmail から通知する。
+CNN の [Fear & Greed Index](https://edition.cnn.com/markets/fear-and-greed) ・[日経平均VI](https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi)・日経平均株価を毎日取得して、1 通のメールにまとめて Gmail から通知する。
 区分（Extreme Fear / Fear / Neutral / Greed / Extreme Greed）が前回から変わった日は、変化を知らせる文面を先頭に付ける。
 
 ```
@@ -28,17 +28,28 @@ Extreme Fear（極度の恐怖） → Fear（恐怖）
 1ヶ月前比: -2.97（25.55）
 1年前比: -2.71（25.29）
 
+🗾 日経平均株価: 68,309円（2026-10-02 終値）
+
+前日比: -0.9%（68,957円）
+1週間前比: +2.9%（66,364円）
+1ヶ月前比: +6.2%（64,326円）
+1年前比: +52.0%（44,937円）
+
+💡 日経平均VIの見方
+・Fear & Greed とは向きが逆で、高いほど不安が強い
+・…
+
 [Fear & Greed の過去6ヶ月の推移グラフ]
-[日経平均VI の過去6ヶ月の推移グラフ]
+[日経平均VI（上）と日経平均株価（下）の過去6ヶ月の推移グラフ]
 ```
 
-括弧内は比較対象の時点の値。日経平均VIの 1週間前・1ヶ月前・1年前は、その日以前で最も近い営業日と比べる。グラフは PNG で本文に埋め込む（`chart.py`）。描画や日経平均VIの取得に失敗した場合も、残りの内容で送る。メール 1 通は 160KB 程度。
+括弧内は比較対象の時点の値。日経平均VI・日経平均株価の 1週間前・1ヶ月前・1年前は、その日以前で最も近い営業日と比べる。グラフは PNG で本文に埋め込む（`chart.py`）。描画や日経のデータの取得に失敗した場合も、残りの内容で送る。メール 1 通は 200KB 程度（Gmail の上限は 25MB）。
 
 ## 仕組み
 
 - GitHub Actions が毎日 09:30 JST に `fear_greed.py` を実行（`.github/workflows/notify.yml`）
 - 前回の区分・スコア・データ時刻を `state/state.json` に保存し、Actions がコミットする
-- Fear & Greed・日経平均VIのどちらも前回と同じデータ（週末・日米ともに休場）なら通知しない。手動実行時に `force` にチェックを入れると、同じデータでも送る
+- Fear & Greed・日経のデータのどちらも前回と同じデータ（週末・日米ともに休場）なら通知しない。手動実行時に `force` にチェックを入れると、同じデータでも送る
 
 ## セットアップ
 
