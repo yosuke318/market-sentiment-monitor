@@ -18,6 +18,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import nikkei
+import topix
 
 API_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 # ヘッダーなしだと 418 (I'm a teapot) が返るため、ブラウザからのアクセスに見せる
@@ -165,7 +166,7 @@ def send_mail(
 
 
 def render_charts(
-    raw: dict, vi_rows: list | None, average_rows: list | None
+    raw: dict, vi_rows: list | None, average_rows: list | None, topix_rows: list | None = None
 ) -> list[tuple[str, str, bytes]]:
     # グラフが描けなくても数値のメールは送る
     try:
@@ -200,12 +201,18 @@ def render_charts(
         return [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in rows]
 
     if vi_rows and average_rows:
+        # TOPIX は日経の確定済みの終値に合わせる（取得時刻によっては当日の取引中の値が混ざるため）
+        topix_rows = [r for r in topix_rows or [] if r[0] <= average_rows[-1][0]]
+        alt = "日経平均株価（左軸）と日経平均VI（右軸）の推移（過去2年半）"
+        if topix_rows:
+            alt = "日経平均株価・TOPIX（左軸）と日経平均VI（右軸）の推移（過去2年半）"
         jobs.append((
-            "nikkei", "日経平均株価（左軸）と日経平均VI（右軸）の推移（過去2年半）",
+            "nikkei", alt,
             lambda: chart.render_dual_axis(
                 ("Nikkei 225", to_points(average_rows), "{:,.0f}"),
                 ("Nikkei VI", to_points(vi_rows), "{:.2f}"),
                 days=NIKKEI_CHART_DAYS,
+                extra=("TOPIX", to_points(topix_rows), "{:,.0f}") if topix_rows else None,
             ),
         ))
     elif vi_rows or average_rows:
@@ -230,6 +237,14 @@ def fetch_nikkei(csv_name: str) -> list | None:
         return nikkei.fetch(csv_name)
     except Exception as e:
         print(f"Nikkei fetch failed ({csv_name}): {e!r}", file=sys.stderr)
+        return None
+
+
+def fetch_topix() -> list | None:
+    try:
+        return topix.fetch()
+    except Exception as e:
+        print(f"TOPIX fetch failed: {e!r}", file=sys.stderr)
         return None
 
 
@@ -286,7 +301,7 @@ def main() -> int:
         # 送り先の指定がなければ自分宛て
         send_mail(
             user, app_password, os.environ.get("MAIL_TO") or user, subject, sections,
-            render_charts(raw, vi_rows, average_rows),
+            render_charts(raw, vi_rows, average_rows, fetch_topix()),
         )
     else:
         print("MAIL_USER / MAIL_APP_PASSWORD are not set; mail skipped.", file=sys.stderr)
