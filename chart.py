@@ -21,6 +21,8 @@ GRID = "#e1e0d9"
 BASELINE = "#c3c2b7"
 # 2 系列を色で見分けるときの順番（青 → オレンジ）
 SERIES_COLORS = ["#2a78d6", "#eb6834"]
+# 3 本目（TOPIX）。青・オレンジと見分けがつき、Fear & Greed の帯（赤・青）とも混ざらない緑
+EXTRA_COLOR = "#1f9d62"
 
 # Fear & Greed の区分。悲観 = 赤、楽観 = 青、中立 = グレーの diverging 配色。帯は背景なので薄く敷く
 FEAR_GREED_ZONES = [
@@ -90,6 +92,7 @@ def render_dual_axis(
     days: int,
     *,
     right_zones: list[tuple] | None = None,
+    extra: tuple[str, list[tuple[datetime, float]], str] | None = None,
 ) -> bytes:
     """2 つの指標を 1 つの枠に重ね、左右それぞれの y 軸で描く。
 
@@ -97,6 +100,8 @@ def render_dual_axis(
     いくらでも変わって見えるので、範囲は手で合わせず各データの最小〜最大から自動で取る。
     right_zones を渡すと、右軸はその範囲に固定して背景に区分の帯を敷く（Fear & Greed 用）。
     そのとき右の線は塗りつぶさない（帯と重なって読みにくくなるため）。
+    extra を渡すと、左軸の外側に独立した 3 本目の軸を足して緑の線を描く（日経平均と TOPIX のように
+    同じ左側でも桁が違う指標用）。
     """
     since = datetime.now(timezone.utc) - timedelta(days=days)
     fig, ax_left = plt.subplots(figsize=(8, 4.2), dpi=150)
@@ -108,6 +113,15 @@ def render_dual_axis(
     ax_right.set_zorder(1)
     ax_left.set_zorder(2)
     ax_left.patch.set_visible(False)
+    ax_extra = None
+    if extra:
+        # 左軸の外側に目盛りを出す。軸の範囲は他と同じく自動
+        ax_extra = ax_left.twinx()
+        ax_extra.set_zorder(3)
+        ax_extra.patch.set_visible(False)
+        ax_extra.yaxis.set_ticks_position("left")
+        ax_extra.yaxis.set_label_position("left")
+        ax_extra.spines["left"].set_position(("outward", 46))
 
     handles = []
     last_x = None
@@ -122,10 +136,15 @@ def render_dual_axis(
         ax_right.set_ylim(right_zones[0][0], right_zones[-1][1])
         ax_right.set_yticks(sorted({z[0] for z in right_zones} | {right_zones[-1][1]}))
 
-    for ax, (name, points, value_format), color, fill in (
-        (ax_left, left, SERIES_COLORS[1], False),
-        (ax_right, right, SERIES_COLORS[0], not right_zones),
-    ):
+    # 日経平均と TOPIX は連動するので右端が近くなりやすい。値ラベルが重ならないよう上下にずらす
+    label_dy = (7, 0, -7) if extra else (0, 0, 0)
+    series = [
+        (ax_left, left, SERIES_COLORS[1], False, label_dy[0]),
+        (ax_right, right, SERIES_COLORS[0], not right_zones, label_dy[1]),
+    ]
+    if ax_extra:
+        series.append((ax_extra, extra, EXTRA_COLOR, False, label_dy[2]))
+    for ax, (name, points, value_format), color, fill, dy in series:
         points = [(t, y) for t, y in points if t >= since]
         xs = [t for t, _ in points]
         ys = [y for _, y in points]
@@ -135,7 +154,7 @@ def render_dual_axis(
             ax.fill_between(xs, ys, min(ys), color=color, alpha=0.08, linewidth=0)
         ax.scatter([xs[-1]], [ys[-1]], s=24, color=color, edgecolors=SURFACE, linewidths=1.5, zorder=3)
         ax.annotate(
-            value_format.format(ys[-1]), (xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points",
+            value_format.format(ys[-1]), (xs[-1], ys[-1]), xytext=(6, dy), textcoords="offset points",
             ha="left", va="center", fontsize=9, fontweight="bold", color=INK,
         )
         ax.yaxis.set_major_formatter(mticker.StrMethodFormatter("{x:,.0f}"))
@@ -147,13 +166,15 @@ def render_dual_axis(
     # 目盛りの数値だけでは左右どちらの軸か分からないので、軸名を付ける
     ax_left.set_ylabel(f"{left[0]}  (left)", color=MUTED, fontsize=8)
     ax_right.set_ylabel(f"{right[0]}  (right)", color=MUTED, fontsize=8)
+    if ax_extra:
+        ax_extra.set_ylabel(f"{extra[0]}  (left, outer)", color=MUTED, fontsize=8)
     # 区分の帯があるときは横の基準線を帯だけにし、左軸の横グリッドと混ざらないようにする
     ax_left.grid(axis="x" if right_zones else "both", color=GRID, linewidth=0.6)
     ax_left.spines["bottom"].set_visible(True)
     ax_left.spines["bottom"].set_color(BASELINE)
     ax_left.legend(
         handles=handles, loc="upper left", frameon=False, fontsize=9, labelcolor=INK,
-        bbox_to_anchor=(0, 1.12), ncol=2,
+        bbox_to_anchor=(0, 1.12), ncol=len(handles),
     )
 
     ax_left.set_xlim(since, last_x + timedelta(days=days // 15))
