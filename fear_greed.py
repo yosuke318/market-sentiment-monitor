@@ -18,7 +18,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import nikkei
-import topix
+import yahoo
 
 API_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 # ヘッダーなしだと 418 (I'm a teapot) が返るため、ブラウザからのアクセスに見せる
@@ -47,6 +47,16 @@ LABELS = {
 NIKKEI_CHART_DAYS = 900
 # CNN の API が返すのが約 1 年分なので、それを全部使う
 US_CHART_DAYS = 365
+# CNN の API が Fear & Greed と一緒に返す 7 つの構成要素（キー, 表示名）
+COMPONENTS = [
+    ("market_momentum_sp500", "株価の勢い（S&P500）"),
+    ("stock_price_strength", "株価の強さ（新高値と新安値）"),
+    ("stock_price_breadth", "株価の幅（値上がりと値下がり）"),
+    ("put_call_options", "プット/コール"),
+    ("market_volatility_vix", "ボラティリティ（VIX）"),
+    ("junk_bond_demand", "ジャンク債需要"),
+    ("safe_haven_demand", "安全資産需要"),
+]
 COMPARISONS = [
     ("前日比", "previous_close"),
     ("1週間前比", "previous_1_week"),
@@ -114,6 +124,19 @@ def build_message(data: dict, prev_rating: str | None) -> str:
         f"（{as_of:%Y-%m-%d %H:%M} JST 時点）",
     ]
     return "\n".join(lines)
+
+
+def build_components_message(raw: dict) -> str | None:
+    """Fear & Greed の 7 つの構成要素それぞれの区分。API の形が変わって読めなければ省く。"""
+    lines = []
+    for key, name in COMPONENTS:
+        rating = (raw.get(key) or {}).get("rating")
+        if rating in LABELS:
+            _, ja, emoji = LABELS[rating]
+            lines.append(f"{emoji} {name}: {ja}")
+    if not lines:
+        return None
+    return "\n".join(["内訳（構成要素ごとの区分）:", *lines])
 
 
 def build_subject(data: dict, prev_rating: str | None) -> str:
@@ -201,8 +224,6 @@ def render_charts(
         return [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in rows]
 
     if vi_rows and average_rows:
-        # TOPIX は日経の確定済みの終値に合わせる（取得時刻によっては当日の取引中の値が混ざるため）
-        topix_rows = [r for r in topix_rows or [] if r[0] <= average_rows[-1][0]]
         alt = "日経平均株価（左軸）と日経平均VI（右軸）の推移（過去2年半）"
         if topix_rows:
             alt = "日経平均株価・TOPIX（左軸）と日経平均VI（右軸）の推移（過去2年半）"
@@ -240,11 +261,11 @@ def fetch_nikkei(csv_name: str) -> list | None:
         return None
 
 
-def fetch_topix() -> list | None:
+def fetch_yahoo(symbol: str) -> list | None:
     try:
-        return topix.fetch()
+        return yahoo.fetch(symbol)
     except Exception as e:
-        print(f"TOPIX fetch failed: {e!r}", file=sys.stderr)
+        print(f"Yahoo fetch failed ({symbol}): {e!r}", file=sys.stderr)
         return None
 
 
@@ -269,6 +290,17 @@ def main() -> int:
     # 日経のデータが取れなくても Fear & Greed は送る
     vi_rows = fetch_nikkei(nikkei.VI_CSV)
     average_rows = fetch_nikkei(nikkei.AVERAGE_CSV)
+    # TOPIX は日経平均がある日だけ使う。日経の確定済みの終値に合わせて切る
+    # （取得時刻によっては当日の取引中の値が混ざるため）
+    topix_rows = fetch_yahoo(yahoo.TOPIX) if average_rows else None
+    if topix_rows:
+        topix_rows = [r for r in topix_rows if r[0] <= average_rows[-1][0]] or None
+    sox_rows = fetch_yahoo(yahoo.SOX)
+    jp_semi_rows = fetch_yahoo(yahoo.JP_SEMICONDUCTOR_ETF)
+    # 日本の ETF も TOPIX と同じく取引中の値が混ざりうる。日経平均が取れない日は暦で当日を除く
+    jp_cutoff = average_rows[-1][0] if average_rows else datetime.now(JST).date() - timedelta(days=1)
+    if jp_semi_rows:
+        jp_semi_rows = [r for r in jp_semi_rows if r[0] <= jp_cutoff] or None
     vi_date = vi_rows[-1][0].isoformat() if vi_rows else state.get("nikkei_vi_date")
 
     # 週末・祝日はどちらも前回と同じデータなので通知しない（FORCE=1 で手動テスト時は送る）
@@ -279,6 +311,13 @@ def main() -> int:
 
     subject = build_subject(data, state.get("rating"))
     us_text = build_message(data, state.get("rating"))
+    components_text = build_components_message(raw)
+    if components_text:
+        us_text += "\n\n" + components_text
+    if sox_rows:
+        us_text += "\n\n" + nikkei.build_sox_message(sox_rows)
+    else:
+        us_text += "\n\n⚠️ SOX指数は取得に失敗しました。"
     jp_texts = []
     if vi_rows:
         subject += f" / 日経VI {vi_rows[-1][1]:.1f}"
@@ -289,6 +328,16 @@ def main() -> int:
         jp_texts.append(nikkei.build_average_message(average_rows))
     else:
         jp_texts.append("⚠️ 日経平均株価は取得に失敗しました。")
+    if average_rows:
+        nt_rows = nikkei.nt_ratio(average_rows, topix_rows) if topix_rows else []
+        if nt_rows:
+            jp_texts.append(nikkei.build_nt_ratio_message(nt_rows))
+        else:
+            jp_texts.append("⚠️ TOPIX は取得に失敗しました（NT倍率とグラフの TOPIX を省略）。")
+    if jp_semi_rows:
+        jp_texts.append(nikkei.build_jp_semiconductor_message(jp_semi_rows))
+    else:
+        jp_texts.append("⚠️ 日本の半導体株（ETF 200A）は取得に失敗しました。")
     # グラフの直前にそのグラフの数値が来るよう、米国と日本で区切る
     sections = [("fear-greed", us_text), ("nikkei", "\n\n".join(jp_texts))]
     body = SECTION_SEPARATOR.join(text for _, text in sections)
@@ -301,7 +350,7 @@ def main() -> int:
         # 送り先の指定がなければ自分宛て
         send_mail(
             user, app_password, os.environ.get("MAIL_TO") or user, subject, sections,
-            render_charts(raw, vi_rows, average_rows, fetch_topix()),
+            render_charts(raw, vi_rows, average_rows, topix_rows),
         )
     else:
         print("MAIL_USER / MAIL_APP_PASSWORD are not set; mail skipped.", file=sys.stderr)

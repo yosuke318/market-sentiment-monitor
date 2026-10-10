@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import csv
 import io
+import math
+import statistics
 import time
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -68,18 +70,63 @@ def compare(rows: list[tuple[date, float]]) -> list[tuple[str, tuple[date, float
     return [(name, row) for name, row in compared if row]
 
 
+def position_message(rows: list[tuple[date, float]]) -> str:
+    """最新値が CSV 全体（直近 3 年ほど）の中でどの水準かを 1 行で返す。"""
+    values = [v for _, v in rows]
+    latest = values[-1]
+    # 自分自身を含めて数えるので、最高値でも 0% にはならない
+    top = math.ceil(sum(v >= latest for v in values) / len(values) * 100)
+    return (
+        f"水準: {rows[0][0]:%Y-%m}以降の{len(values)}営業日で上位{top}%"
+        f"（中央値 {statistics.median(values):.2f}、最高 {max(values):.2f}、最低 {min(values):.2f}）"
+    )
+
+
 def build_vi_message(rows: list[tuple[date, float]]) -> str:
     latest_date, latest = rows[-1]
     lines = [f"📊 日経平均VI: {latest:.2f}（{latest_date:%Y-%m-%d} 終値）", ""]
     lines += [f"{name}: {latest - v:+.2f}（{v:.2f}）" for name, (_, v) in compare(rows)]
+    lines += ["", position_message(rows)]
+    return "\n".join(lines)
+
+
+def build_percent_message(title: str, rows: list[tuple[date, float]], unit: str = "") -> str:
+    """株価・株価指数用。比較は騰落率（%）で出す。"""
+    latest_date, latest = rows[-1]
+    lines = [f"{title}: {latest:,.0f}{unit}（{latest_date:%Y-%m-%d} 終値）", ""]
+    lines += [
+        f"{name}: {(latest / v - 1) * 100:+.1f}%（{v:,.0f}{unit}）"
+        for name, (_, v) in compare(rows)
+    ]
     return "\n".join(lines)
 
 
 def build_average_message(rows: list[tuple[date, float]]) -> str:
+    return build_percent_message("🗾 日経平均株価", rows, "円")
+
+
+def build_sox_message(rows: list[tuple[date, float]]) -> str:
+    return build_percent_message("💾 SOX指数（米国の半導体株）", rows)
+
+
+def build_jp_semiconductor_message(rows: list[tuple[date, float]]) -> str:
+    return (
+        build_percent_message("🔌 日本の半導体株（日経半導体株指数連動ETF 200A）", rows, "円")
+        + "\n\n指数の代わりに連動 ETF の価格で見ている（騰落率は指数とほぼ同じ）。"
+    )
+
+
+def nt_ratio(
+    average_rows: list[tuple[date, float]], topix_rows: list[tuple[date, float]]
+) -> list[tuple[date, float]]:
+    """日経平均 ÷ TOPIX。両方に終値がある日だけ数える（休場日がずれる日があるため）。"""
+    topix = dict(topix_rows)
+    return [(d, v / topix[d]) for d, v in average_rows if d in topix]
+
+
+def build_nt_ratio_message(rows: list[tuple[date, float]]) -> str:
     latest_date, latest = rows[-1]
-    lines = [f"🗾 日経平均株価: {latest:,.0f}円（{latest_date:%Y-%m-%d} 終値）", ""]
-    lines += [
-        f"{name}: {(latest / v - 1) * 100:+.1f}%（{v:,.0f}円）"
-        for name, (_, v) in compare(rows)
-    ]
+    lines = [f"⚖️ NT倍率（日経平均÷TOPIX）: {latest:.2f}（{latest_date:%Y-%m-%d} 終値）", ""]
+    lines += [f"{name}: {latest - v:+.2f}（{v:.2f}）" for name, (_, v) in compare(rows)]
+    lines += ["", "上がるほど日経平均が値がさ株に引っ張られ、下がるほど TOPIX（市場全体）が強い。"]
     return "\n".join(lines)

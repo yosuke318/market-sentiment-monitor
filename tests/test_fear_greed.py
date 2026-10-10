@@ -1,6 +1,6 @@
 import unittest
 
-from fear_greed import build_message, build_subject, change_message
+from fear_greed import build_components_message, build_message, build_subject, change_message
 
 DATA = {
     "score": 31.17,
@@ -50,6 +50,26 @@ class BuildSubjectTest(unittest.TestCase):
             build_subject(DATA, "extreme fear"),
             "【区分変化】Extreme Fear → Fear（Fear & Greed 31）",
         )
+
+
+class BuildComponentsMessageTest(unittest.TestCase):
+    def test_lists_ratings_in_fixed_order(self):
+        raw = {
+            "market_volatility_vix": {"rating": "extreme fear", "data": []},
+            "market_momentum_sp500": {"rating": "greed", "data": []},
+        }
+        msg = build_components_message(raw)
+        self.assertEqual(
+            msg,
+            "内訳（構成要素ごとの区分）:\n"
+            "😏 株価の勢い（S&P500）: 強欲\n"
+            "😱 ボラティリティ（VIX）: 極度の恐怖",
+        )
+
+    def test_unknown_or_missing_is_skipped(self):
+        raw = {"put_call_options": {"rating": "???"}, "junk_bond_demand": None}
+        self.assertIsNone(build_components_message(raw))
+        self.assertIsNone(build_components_message({}))
 
 
 if __name__ == "__main__":
