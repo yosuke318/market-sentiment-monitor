@@ -1,32 +1,25 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 
 import yahoo
 
-PAYLOAD = {
-    "chart": {
-        "result": [{
-            "meta": {"gmtoffset": 32400},
-            # 2026-10-01 00:00 UTC / 2026-10-02 00:00 UTC / 2026-10-05 00:00 UTC
-            "timestamp": [1790812800, 1790899200, 1791158400],
-            "indicators": {"quote": [{"close": [3500.5, None, 3512.25]}]},
-        }]
-    }
-}
+JST = timezone(timedelta(hours=9))
 
 
 class ParseTest(unittest.TestCase):
-    def test_skips_null_close_and_uses_exchange_date(self):
-        rows = yahoo.parse(PAYLOAD)
-        self.assertEqual([v for _, v in rows], [3500.5, 3512.25])
-        # 現地時間（+9h）の日付になる
-        self.assertEqual([d.isoformat() for d, _ in rows], ["2026-10-01", "2026-10-05"])
+    def test_skips_missing_close_and_uses_exchange_date(self):
+        closes = [
+            (datetime(2026, 10, 1, tzinfo=JST), 3500.5),
+            (datetime(2026, 10, 2, tzinfo=JST), float("nan")),
+            (datetime(2026, 10, 5, tzinfo=JST), None),
+            (datetime(2026, 10, 6, tzinfo=JST), 3512.25),
+        ]
+        rows = yahoo.parse(closes)
+        self.assertEqual([(d.isoformat(), v) for d, v in rows], [("2026-10-01", 3500.5), ("2026-10-06", 3512.25)])
 
     def test_empty_raises(self):
-        payload = {"chart": {"result": [{
-            "meta": {}, "timestamp": [1790812800], "indicators": {"quote": [{"close": [None]}]},
-        }]}}
         with self.assertRaises(ValueError):
-            yahoo.parse(payload)
+            yahoo.parse([(datetime(2026, 10, 1, tzinfo=JST), float("nan"))])
 
 
 if __name__ == "__main__":

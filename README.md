@@ -99,7 +99,7 @@ Extreme Fear（極度の恐怖） → Fear（恐怖）
 
 ## ローカル実行
 
-グラフ描画に matplotlib を使う（`requirements.txt`）。
+グラフ描画に matplotlib、Yahoo Finance の取得に yfinance を使う（`requirements.txt`）。
 
 ```sh
 pip install -r requirements.txt
