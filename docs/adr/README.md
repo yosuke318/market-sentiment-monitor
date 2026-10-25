@@ -14,3 +14,4 @@
 | [0010](0010-add-topix-to-nikkei-chart.md) | TOPIX を日経平均のグラフに緑の 3 本目の軸で足す | Accepted |
 | [0011](0011-nt-ratio-vi-position-fg-components.md) | NT 倍率・VI の過去水準・Fear & Greed の内訳を本文に足す | Accepted |
 | [0012](0012-add-semiconductor-indexes.md) | 米国の SOX 指数と日本の半導体株（ETF 200A で代用）を本文に足す | Accepted |
+| [0013](0013-use-yfinance-for-yahoo.md) | Yahoo Finance の取得は yfinance を使う | Accepted |
