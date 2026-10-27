@@ -258,14 +258,14 @@ def render_charts(
     if vi_rows and average_rows:
         alt = "日経平均株価（左軸）と日経平均VI（右軸）の推移（過去2年半）"
         if topix_rows:
-            alt = "日経平均株価・TOPIX（左軸）と日経平均VI（右軸）の推移（過去2年半）"
+            alt = "日経平均株価・TOPIX 連動 ETF 1306（左軸）と日経平均VI（右軸）の推移（過去2年半）"
         jobs.append((
             "nikkei", alt,
             lambda: chart.render_dual_axis(
                 ("Nikkei 225", to_points(average_rows), "{:,.0f}"),
                 ("Nikkei VI", to_points(vi_rows), "{:.2f}"),
                 days=NIKKEI_CHART_DAYS,
-                extra=("TOPIX", to_points(topix_rows), "{:,.0f}") if topix_rows else None,
+                extra=("TOPIX ETF 1306", to_points(topix_rows), "{:,.0f}") if topix_rows else None,
             ),
         ))
     elif vi_rows or average_rows:
@@ -376,7 +376,7 @@ def main() -> int:
         if nt_rows:
             jp_texts.append(nikkei.build_nt_ratio_message(nt_rows))
         else:
-            jp_texts.append("⚠️ TOPIX は取得に失敗しました（NT倍率とグラフの TOPIX を省略）。")
+            jp_texts.append("⚠️ TOPIX（ETF 1306）は取得に失敗しました（NT倍率とグラフの TOPIX を省略）。")
     if jp_semi_rows:
         jp_texts.append(nikkei.build_jp_semiconductor_message(jp_semi_rows))
     else:

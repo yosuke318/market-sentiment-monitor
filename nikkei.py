@@ -119,14 +119,18 @@ def build_jp_semiconductor_message(rows: list[tuple[date, float]]) -> str:
 def nt_ratio(
     average_rows: list[tuple[date, float]], topix_rows: list[tuple[date, float]]
 ) -> list[tuple[date, float]]:
-    """日経平均 ÷ TOPIX。両方に終値がある日だけ数える（休場日がずれる日があるため）。"""
+    """日経平均 ÷ TOPIX（連動 ETF 1306 の価格で代用）。両方に終値がある日だけ数える（休場日がずれる日があるため）。"""
     topix = dict(topix_rows)
     return [(d, v / topix[d]) for d, v in average_rows if d in topix]
 
 
 def build_nt_ratio_message(rows: list[tuple[date, float]]) -> str:
     latest_date, latest = rows[-1]
-    lines = [f"⚖️ NT倍率（日経平均÷TOPIX）: {latest:.2f}（{latest_date:%Y-%m-%d} 終値）", ""]
+    lines = [f"⚖️ NT倍率（日経平均÷TOPIX）: {latest:.2f}（{latest_date:%Y-%m-%d} 終値・参考値）", ""]
     lines += [f"{name}: {latest - v:+.2f}（{v:.2f}）" for name, (_, v) in compare(rows)]
-    lines += ["", "上がるほど日経平均が値がさ株に引っ張られ、下がるほど TOPIX（市場全体）が強い。"]
+    lines += [
+        "",
+        "上がるほど日経平均が値がさ株に引っ張られ、下がるほど TOPIX（市場全体）が強い。",
+        "TOPIX は連動 ETF 1306 の価格で代用しているので、水準は公表値と少しずれる。上下の向きで見る。",
+    ]
     return "\n".join(lines)
