@@ -21,6 +21,8 @@ GRID = "#e1e0d9"
 BASELINE = "#c3c2b7"
 # 2 系列を色で見分けるときの順番（青 → オレンジ）
 SERIES_COLORS = ["#2a78d6", "#eb6834"]
+# 年ごとの比較で、何年前かに割り当てる色（今年 → 1 年前 → …）。どの年が来ても今年は青
+YEAR_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
 # 3 本目（TOPIX）。青・オレンジと見分けがつき、Fear & Greed の帯（赤・青）とも混ざらない緑
 EXTRA_COLOR = "#1f9d62"
 
@@ -184,6 +186,85 @@ def render_dual_axis(
     fig.tight_layout()
     buf = io.BytesIO()
     # 枠の外に置いた区分名が切れないよう、余白を含めて書き出す
+    fig.savefig(buf, format="png", facecolor=SURFACE, bbox_inches="tight", pad_inches=0.15)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def render_yearly(
+    points: list[tuple[datetime, float]],
+    years: int,
+    *,
+    zones: list[tuple] | None = None,
+    value_format: str = "{:.0f}",
+) -> bytes:
+    """年ごとに 1 本の線にし、横軸を 1〜12 月にそろえて重ねる。今年を太く手前に描く。
+
+    zones を渡すと y 軸はその範囲に固定し、区分の境目に薄い線と区分名を置く。
+    帯を色で塗らないのは、年ごとの線の色と混ざって読みにくくなるため。
+    """
+    by_year: dict[int, list[tuple[datetime, float]]] = {}
+    for t, y in points:
+        by_year.setdefault(t.year, []).append((t, y))
+    latest_year = max(by_year)
+    shown = [yr for yr in range(latest_year - years + 1, latest_year + 1) if yr in by_year]
+
+    fig, ax = plt.subplots(figsize=(8, 4.2), dpi=150)
+    fig.patch.set_facecolor(SURFACE)
+    ax.set_facecolor(SURFACE)
+
+    if zones:
+        for low, high, name, _color, _alpha in zones:
+            ax.text(
+                1.01, (low + high) / 2, name, transform=ax.get_yaxis_transform(),
+                va="center", ha="left", fontsize=7, color=MUTED,
+            )
+        for boundary in sorted({z[0] for z in zones[1:]}):
+            ax.axhline(boundary, color=GRID, linewidth=0.8, zorder=0)
+        ax.set_ylim(zones[0][0], zones[-1][1])
+        ax.set_yticks(sorted({z[0] for z in zones} | {zones[-1][1]}))
+    else:
+        ax.grid(axis="y", color=GRID, linewidth=0.6)
+
+    # 古い年から描き、今年を一番手前にする
+    for yr in shown:
+        ago = latest_year - yr
+        rows = sorted(by_year[yr])
+        # 年をそろえるため、うるう年（2000 年）の同じ月日に置く
+        xs = [datetime(2000, t.month, t.day) for t, _ in rows]
+        ys = [y for _, y in rows]
+        current = ago == 0
+        ax.plot(
+            xs, ys, color=YEAR_COLORS[ago % len(YEAR_COLORS)],
+            linewidth=2.0 if current else 1.0, alpha=1.0 if current else 0.75,
+            solid_capstyle="round", zorder=3 if current else 2,
+            label=f"{yr}" + (" (YTD)" if current else ""),
+        )
+        if current:
+            ax.scatter([xs[-1]], [ys[-1]], s=28, color=YEAR_COLORS[0], edgecolors=SURFACE,
+                       linewidths=1.5, zorder=4)
+            ax.annotate(
+                value_format.format(ys[-1]), (xs[-1], ys[-1]), xytext=(6, 0), textcoords="offset points",
+                ha="left", va="center", fontsize=9, fontweight="bold", color=INK, zorder=4,
+            )
+
+    ax.set_xlim(datetime(2000, 1, 1), datetime(2000, 12, 31))
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
+    ax.tick_params(colors=MUTED, labelsize=8, length=0)
+    ax.grid(axis="x", color=GRID, linewidth=0.6)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color(BASELINE)
+    # 凡例は新しい年から並べる
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(
+        handles[::-1], labels[::-1], loc="upper left", frameon=False, fontsize=9, labelcolor=INK,
+        bbox_to_anchor=(0, 1.13), ncol=len(handles),
+    )
+
+    fig.tight_layout()
+    buf = io.BytesIO()
     fig.savefig(buf, format="png", facecolor=SURFACE, bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
     return buf.getvalue()
