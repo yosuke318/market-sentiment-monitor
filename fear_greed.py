@@ -13,11 +13,12 @@ import smtplib
 import sys
 import time
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
 import nikkei
+import valuation
 import yahoo
 
 API_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
@@ -47,6 +48,8 @@ LABELS = {
 NIKKEI_CHART_DAYS = 900
 # CNN の API が返すのが約 1 年分なので、それを全部使う
 US_CHART_DAYS = 365
+# Fear & Greed を年ごとに重ねて比べる年数（今年を含む）
+YEARLY_CHART_YEARS = 5
 # CNN の API が Fear & Greed と一緒に返す 7 つの構成要素（キー, 表示名）
 COMPONENTS = [
     ("market_momentum_sp500", "株価の勢い（S&P500）"),
@@ -73,8 +76,10 @@ ENTER_COMMENT = {
 }
 
 
-def fetch(retries: int = 3) -> dict:
-    req = urllib.request.Request(API_URL, headers=HEADERS)
+def fetch(retries: int = 3, since: date | None = None) -> dict:
+    """since を渡すと、その日からの履歴を返す（渡さないと約 1 年分）。"""
+    url = f"{API_URL}/{since.isoformat()}" if since else API_URL
+    req = urllib.request.Request(url, headers=HEADERS)
     for attempt in range(1, retries + 1):
         try:
             with urllib.request.urlopen(req, timeout=20) as res:
@@ -139,6 +144,30 @@ def build_components_message(raw: dict) -> str | None:
     return "\n".join(["内訳（構成要素ごとの区分）:", *lines])
 
 
+def cnn_points(series: list[dict]) -> list[tuple[datetime, float]]:
+    return [(datetime.fromtimestamp(p["x"] / 1000, timezone.utc), p["y"]) for p in series]
+
+
+def build_yearly_message(points: list[tuple[datetime, float]]) -> str:
+    """年ごとの比較グラフの見出しと、各年の同じ日付（なければその前で最も近い日）の値。"""
+    latest_t, _ = max(points)
+    years = [yr for yr in range(latest_t.year - YEARLY_CHART_YEARS + 1, latest_t.year + 1)]
+    values = []
+    for yr in reversed(years):
+        # 2/29 は平年にないので 2/28 にする
+        day = min(latest_t.day, 28) if latest_t.month == 2 and latest_t.day == 29 else latest_t.day
+        target = latest_t.replace(year=yr, day=day)
+        earlier = [(t, y) for t, y in points if t.year == yr and t <= target]
+        if earlier:
+            values.append(f"{yr}: {max(earlier)[1]:.0f}")
+    first_year = min(t for t, _ in points).year
+    return "\n".join([
+        f"📅 Fear & Greed の年ごとの比較（{max(first_year, years[0])}〜{years[-1]}年）",
+        "",
+        f"各年の {latest_t:%m/%d} 時点: " + " / ".join(values),
+    ])
+
+
 def build_subject(data: dict, prev_rating: str | None) -> str:
     rating = data["rating"]
     score = f"{data['score']:.0f}"
@@ -189,7 +218,8 @@ def send_mail(
 
 
 def render_charts(
-    raw: dict, vi_rows: list | None, average_rows: list | None, topix_rows: list | None = None
+    raw: dict, vi_rows: list | None, average_rows: list | None, topix_rows: list | None = None,
+    history: list | None = None,
 ) -> list[tuple[str, str, bytes]]:
     # グラフが描けなくても数値のメールは送る
     try:
@@ -197,9 +227,6 @@ def render_charts(
     except Exception as e:
         print(f"Chart skipped: {e!r}", file=sys.stderr)
         return []
-
-    def cnn_points(series: list[dict]) -> list:
-        return [(datetime.fromtimestamp(p["x"] / 1000, timezone.utc), p["y"]) for p in series]
 
     fear_greed_points = cnn_points(raw["fear_and_greed_historical"]["data"])
     sp500 = raw.get("market_momentum_sp500", {}).get("data")
@@ -220,20 +247,26 @@ def render_charts(
             lambda: chart.render(fear_greed_points, zones=chart.FEAR_GREED_ZONES),
         )]
 
+    if history:
+        jobs.append((
+            "fear-greed-years", f"Fear & Greed Index の年ごとの比較（過去{YEARLY_CHART_YEARS}年）",
+            lambda: chart.render_yearly(history, YEARLY_CHART_YEARS, zones=chart.FEAR_GREED_ZONES),
+        ))
+
     def to_points(rows: list) -> list:
         return [(datetime.combine(d, datetime.min.time(), timezone.utc), v) for d, v in rows]
 
     if vi_rows and average_rows:
         alt = "日経平均株価（左軸）と日経平均VI（右軸）の推移（過去2年半）"
         if topix_rows:
-            alt = "日経平均株価・TOPIX（左軸）と日経平均VI（右軸）の推移（過去2年半）"
+            alt = "日経平均株価・TOPIX 連動 ETF 1306（左軸）と日経平均VI（右軸）の推移（過去2年半）"
         jobs.append((
             "nikkei", alt,
             lambda: chart.render_dual_axis(
                 ("Nikkei 225", to_points(average_rows), "{:,.0f}"),
                 ("Nikkei VI", to_points(vi_rows), "{:.2f}"),
                 days=NIKKEI_CHART_DAYS,
-                extra=("TOPIX", to_points(topix_rows), "{:,.0f}") if topix_rows else None,
+                extra=("TOPIX ETF 1306", to_points(topix_rows), "{:,.0f}") if topix_rows else None,
             ),
         ))
     elif vi_rows or average_rows:
@@ -261,11 +294,31 @@ def fetch_nikkei(csv_name: str) -> list | None:
         return None
 
 
+def fetch_or_none(name: str, fetch, *args) -> list | None:
+    """取れなければ None を返す。どれか 1 つが取れなくても残りは送る。"""
+    try:
+        return fetch(*args)
+    except Exception as e:
+        print(f"{name} fetch failed: {e!r}", file=sys.stderr)
+        return None
+
+
 def fetch_yahoo(symbol: str) -> list | None:
     try:
         return yahoo.fetch(symbol)
     except Exception as e:
         print(f"Yahoo fetch failed ({symbol}): {e!r}", file=sys.stderr)
+        return None
+
+
+def fetch_history() -> list | None:
+    """年ごとの比較用に、Fear & Greed の過去数年分を取る。取れなくても他は送る。"""
+    since = datetime.now(JST).date().replace(month=1, day=1)
+    since = since.replace(year=since.year - YEARLY_CHART_YEARS + 1)
+    try:
+        return cnn_points(fetch(since=since)["fear_and_greed_historical"]["data"]) or None
+    except Exception as e:
+        print(f"Fear & Greed history fetch failed: {e!r}", file=sys.stderr)
         return None
 
 
@@ -301,6 +354,8 @@ def main() -> int:
     jp_cutoff = average_rows[-1][0] if average_rows else datetime.now(JST).date() - timedelta(days=1)
     if jp_semi_rows:
         jp_semi_rows = [r for r in jp_semi_rows if r[0] <= jp_cutoff] or None
+    per_rows = fetch_or_none("Nikkei PER", valuation.fetch_per, datetime.now(JST).date())
+    jgb_rows = fetch_or_none("JGB 10y", valuation.fetch_jgb10)
     vi_date = vi_rows[-1][0].isoformat() if vi_rows else state.get("nikkei_vi_date")
 
     # 週末・祝日はどちらも前回と同じデータなので通知しない（FORCE=1 で手動テスト時は送る）
@@ -333,13 +388,18 @@ def main() -> int:
         if nt_rows:
             jp_texts.append(nikkei.build_nt_ratio_message(nt_rows))
         else:
-            jp_texts.append("⚠️ TOPIX は取得に失敗しました（NT倍率とグラフの TOPIX を省略）。")
+            jp_texts.append("⚠️ TOPIX（ETF 1306）は取得に失敗しました（NT倍率とグラフの TOPIX を省略）。")
+    jp_texts.append(valuation.build_message(per_rows, jgb_rows))
     if jp_semi_rows:
         jp_texts.append(nikkei.build_jp_semiconductor_message(jp_semi_rows))
     else:
         jp_texts.append("⚠️ 日本の半導体株（ETF 200A）は取得に失敗しました。")
     # グラフの直前にそのグラフの数値が来るよう、米国と日本で区切る
-    sections = [("fear-greed", us_text), ("nikkei", "\n\n".join(jp_texts))]
+    sections = [("fear-greed", us_text)]
+    history = fetch_history()
+    if history:
+        sections.append(("fear-greed-years", build_yearly_message(history)))
+    sections.append(("nikkei", "\n\n".join(jp_texts)))
     body = SECTION_SEPARATOR.join(text for _, text in sections)
     print(subject, body, sep="\n\n")
 
@@ -350,7 +410,7 @@ def main() -> int:
         # 送り先の指定がなければ自分宛て
         send_mail(
             user, app_password, os.environ.get("MAIL_TO") or user, subject, sections,
-            render_charts(raw, vi_rows, average_rows, topix_rows),
+            render_charts(raw, vi_rows, average_rows, topix_rows, history),
         )
     else:
         print("MAIL_USER / MAIL_APP_PASSWORD are not set; mail skipped.", file=sys.stderr)

@@ -66,7 +66,7 @@ class NtRatioTest(unittest.TestCase):
     def test_message(self):
         rows = [(date(2026, 10, 1), 19.80), (date(2026, 10, 2), 20.00)]
         msg = build_nt_ratio_message(rows)
-        self.assertIn("NT倍率（日経平均÷TOPIX）: 20.00（2026-10-02 終値）", msg)
+        self.assertIn("NT倍率（日経平均÷TOPIX）: 20.00（2026-10-02 終値・参考値）", msg)
         self.assertIn("前日比: +0.20（19.80）", msg)
 
 

@@ -17,5 +17,13 @@ class RenderDualAxisTest(unittest.TestCase):
             self.assertTrue(png.startswith(b"\x89PNG"))
 
 
+class RenderYearlyTest(unittest.TestCase):
+    def test_renders_png_across_years(self):
+        start = datetime(2022, 1, 3, tzinfo=timezone.utc)
+        points = [(start + timedelta(days=i), 50 + (i % 40) - 20) for i in range(0, 1700, 3)]
+        png = chart.render_yearly(points, 5, zones=chart.FEAR_GREED_ZONES)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+
 if __name__ == "__main__":
     unittest.main()

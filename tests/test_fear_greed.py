@@ -1,6 +1,10 @@
 import unittest
 
-from fear_greed import build_components_message, build_message, build_subject, change_message
+from datetime import datetime, timezone
+
+from fear_greed import (
+    build_components_message, build_message, build_subject, build_yearly_message, change_message,
+)
 
 DATA = {
     "score": 31.17,
@@ -70,6 +74,20 @@ class BuildComponentsMessageTest(unittest.TestCase):
         raw = {"put_call_options": {"rating": "???"}, "junk_bond_demand": None}
         self.assertIsNone(build_components_message(raw))
         self.assertIsNone(build_components_message({}))
+
+
+class BuildYearlyMessageTest(unittest.TestCase):
+    def test_same_date_each_year_uses_nearest_earlier_day(self):
+        def t(y, m, d):
+            return datetime(y, m, d, tzinfo=timezone.utc)
+        points = [
+            (t(2024, 10, 25), 40.0),  # 2024/10/26 は土曜でデータなし → 10/25
+            (t(2025, 10, 24), 30.0), (t(2025, 10, 26), 35.0), (t(2025, 10, 27), 99.0),
+            (t(2026, 10, 23), 20.0), (t(2026, 10, 26), 27.0),
+        ]
+        msg = build_yearly_message(points)
+        self.assertIn("Fear & Greed の年ごとの比較（2024〜2026年）", msg)
+        self.assertIn("各年の 10/26 時点: 2026: 27 / 2025: 35 / 2024: 40", msg)
 
 
 if __name__ == "__main__":

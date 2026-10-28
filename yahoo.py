@@ -9,7 +9,8 @@ import math
 from collections.abc import Iterable
 from datetime import date, datetime
 
-TOPIX = "^TOPX"
+# TOPIX の指数そのもの（^TOPX）は Yahoo に無い（404）ので、連動する ETF（NEXT FUNDS TOPIX 連動型）で代用する
+TOPIX = "1306.T"
 # フィラデルフィア半導体株指数（米国）
 SOX = "^SOX"
 # 日経半導体株指数は Yahoo に無いので、連動する ETF（NEXT FUNDS 日経半導体株指数連動型）で代用する
