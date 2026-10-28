@@ -16,3 +16,4 @@
 | [0012](0012-add-semiconductor-indexes.md) | 米国の SOX 指数と日本の半導体株（ETF 200A で代用）を本文に足す | Accepted |
 | [0013](0013-use-yfinance-for-yahoo.md) | Yahoo Finance の取得は yfinance を使う | Accepted |
 | [0014](0014-fear-greed-yearly-comparison.md) | Fear & Greed を過去 5 年で年ごとに重ねて比べる | Accepted |
+| [0015](0015-nikkei-per-and-yield-spread.md) | 日経平均の PER と 10 年債利回りからイールドスプレッドを出す | Accepted |

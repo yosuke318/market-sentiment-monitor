@@ -18,6 +18,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 import nikkei
+import valuation
 import yahoo
 
 API_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
@@ -293,6 +294,15 @@ def fetch_nikkei(csv_name: str) -> list | None:
         return None
 
 
+def fetch_or_none(name: str, fetch, *args) -> list | None:
+    """取れなければ None を返す。どれか 1 つが取れなくても残りは送る。"""
+    try:
+        return fetch(*args)
+    except Exception as e:
+        print(f"{name} fetch failed: {e!r}", file=sys.stderr)
+        return None
+
+
 def fetch_yahoo(symbol: str) -> list | None:
     try:
         return yahoo.fetch(symbol)
@@ -344,6 +354,8 @@ def main() -> int:
     jp_cutoff = average_rows[-1][0] if average_rows else datetime.now(JST).date() - timedelta(days=1)
     if jp_semi_rows:
         jp_semi_rows = [r for r in jp_semi_rows if r[0] <= jp_cutoff] or None
+    per_rows = fetch_or_none("Nikkei PER", valuation.fetch_per, datetime.now(JST).date())
+    jgb_rows = fetch_or_none("JGB 10y", valuation.fetch_jgb10)
     vi_date = vi_rows[-1][0].isoformat() if vi_rows else state.get("nikkei_vi_date")
 
     # 週末・祝日はどちらも前回と同じデータなので通知しない（FORCE=1 で手動テスト時は送る）
@@ -377,6 +389,7 @@ def main() -> int:
             jp_texts.append(nikkei.build_nt_ratio_message(nt_rows))
         else:
             jp_texts.append("⚠️ TOPIX（ETF 1306）は取得に失敗しました（NT倍率とグラフの TOPIX を省略）。")
+    jp_texts.append(valuation.build_message(per_rows, jgb_rows))
     if jp_semi_rows:
         jp_texts.append(nikkei.build_jp_semiconductor_message(jp_semi_rows))
     else:
