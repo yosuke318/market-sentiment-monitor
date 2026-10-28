@@ -1,0 +1,17 @@
+# 調査用（一時）: 日経平均の PER と財務省の国債金利 CSV が Actions から取れるかを確かめる。
+# メール送信・state の更新はしない。調査が終わったらこのブランチごと削除する。
+name: Probe PER and JGB sources
+
+on:
+  push:
+    branches: [probe-per-jgb]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python .github/probe_per_jgb.py
